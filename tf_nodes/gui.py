@@ -3,6 +3,8 @@ from qtpy.QtWidgets import QLineEdit
 from qtpy.QtCore import Qt
 from . import nodes
 from qtpy.QtGui import QFont
+from qtpy.QtWidgets import QComboBox
+from qtpy.QtWidgets import QVBoxLayout, QWidget
 
 
 
@@ -42,6 +44,26 @@ class LineEditWidget(NodeInputWidget, QLineEdit):
 
     def set_state(self, state: dict):
         self.setText(state.get('text', ''))  # Restore previous text
+
+
+class ComboBoxWidget(QWidget):
+    def __init__(self, options, default=None):
+        super().__init__()
+        self.position = 'below'  # <--- THIS IS REQUIRED
+        self.combo = QComboBox()
+        self.combo.addItems(options)
+        #self.combo.setFont(QFont("Arial", 10))  # Set readable font and size
+        #self.combo.setStyleSheet("color: black; background-color: white;")  # Ensure text is visible
+        if default in options:
+            self.combo.setCurrentText(default)
+        
+        layout = QVBoxLayout()
+        layout.addWidget(self.combo)
+        self.setLayout(layout)
+
+    def get_val(self):
+        return self.combo.currentText()
+
 
 
 @node_gui(nodes.InputNode)
@@ -95,11 +117,13 @@ class Conv2DNodeGui(NodeGUI):
 class DenseNodeGui(NodeGUI):
     
     input_widget_classes = {
-        'line_edit': LineEditWidget
+        'line_edit': LineEditWidget,
+        'combo_box': ComboBoxWidget
     }
 
     init_input_widgets = {
-        1: {'name': 'line_edit', 'pos': 'below'}
+        1: {'name': 'line_edit', 'pos': 'below'},
+        2: {'name': 'combo_box', 'pos': 'below', 'args': ['relu', 'sigmoid', 'softmax']}
     }
 
 @node_gui(nodes.DropoutNode)
@@ -192,4 +216,39 @@ class RMSpropOptimizerNodeGui(NodeGUI):
 
     init_input_widgets = {
         0: {'name': 'line_edit', 'pos': 'below'}
+    }
+
+@node_gui(nodes.GlorotUniformInitializerNode)
+class GlorotUniformInitializerNodeGui(NodeGUI):
+    
+    input_widget_classes = {
+        'line_edit': LineEditWidget
+    }
+
+    init_input_widgets = {
+        0: {'name': 'line_edit', 'pos': 'below'}
+    }
+
+@node_gui(nodes.ModelCompileNode)
+class ModelCompileNodeGui(NodeGUI):
+    
+    input_widget_classes = {
+        'line_edit': LineEditWidget
+    }
+
+    init_input_widgets = {
+        1: {'name': 'line_edit', 'pos': 'below'},
+        2: {'name': 'line_edit', 'pos': 'below'},
+        3: {'name': 'line_edit', 'pos': 'below'}
     }  
+
+@node_gui(nodes.ModelSaveNode)
+class ModelSaveNodeGui(NodeGUI):
+    
+    input_widget_classes = {
+        'line_edit': LineEditWidget
+    }
+
+    init_input_widgets = {
+        1: {'name': 'line_edit', 'pos': 'below'}
+    } 

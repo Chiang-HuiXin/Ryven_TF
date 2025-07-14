@@ -8,6 +8,9 @@ import numpy as np
 import sys
 import ryven
 from qtpy.QtWidgets import QLineEdit
+import os
+from sklearn.model_selection import train_test_split
+#from tensorflow.keras.utils import to_categorical
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +52,7 @@ class InputNode(Node):
         shape = self.input(0).payload
         try:
             tensor = tf.keras.Input(shape=shape)
-            code = f"input_layer_{input_count} = tf.keras.Input(shape={shape})"
+            code = f"input_layer_{input_count}_{str(id(self))[-4:]} = tf.keras.Input(shape={shape})"
             print(f"Successful")
             print(f"----------------------------------------")
             self.set_output_val(0, Data((tensor, code, 1)))
@@ -57,7 +60,7 @@ class InputNode(Node):
             print("InputNode error:", e)
             self.set_output_val(0, Data((None, "")))
 
-class AddNode(Node):
+"""class AddNode(Node):
     title = "Add Node"
     init_inputs = [
         NodeInputType(label='Tensor 1'),
@@ -71,6 +74,12 @@ class AddNode(Node):
             # Get the previous node code and index
             input_valA, input_codeA, idxA = self.input(0).payload
             input_valB, input_codeB, idxB = self.input(1).payload
+
+            print("== AddNode Inputs ==")
+            print("Input A:")
+            print(input_codeA)
+            print("Input B:")
+            print(input_codeB)
 
             print("Attempting to add Tensor 1 and Tensor 2...")
             layer = tf.keras.layers.Add()
@@ -94,11 +103,153 @@ class AddNode(Node):
         input_var_nameA = input_codeA.strip().split("\n")[-1].split("=")[0].strip() # get the previous name
         input_var_nameB = input_codeB.strip().split("\n")[-1].split("=")[0].strip()
 
+        print("Parsed A var name:", input_var_nameA)
+        print("Parsed B var name:", input_var_nameB)
+
+        # Combine all lines and deduplicate while preserving order
+        seen_lines = set()
+        merged_lines = []
+
+        for line in input_codeA.strip().split("\n") + input_codeB.strip().split("\n"):
+            if line not in seen_lines:
+                merged_lines.append(line)
+                seen_lines.add(line)
+
+        # Add the Add() operation
+        merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])")
+
+        if (len(input_var_nameA) > len(input_var_nameB)):
+            code = input_var_nameA
+        else:
+            code = input_var_nameB
+
         code = (
-            f"{input_codeA}\n{input_codeB}\n"
+            f"{code}\n"
             f"{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])"
         )
-        return code, (max_index + 1)
+        return "\n".join(merged_lines), max_index + 1
+        #return merged_lines, (max_index + 1)
+"""
+
+class AddNode(Node):
+    title = "Add Node"
+    init_inputs = [
+        NodeInputType(label='Tensor 1'),
+        NodeInputType(label='Tensor 2')
+    ]
+    init_outputs = [NodeOutputType(label='Result')]
+
+    def update_event(self, inp=-1):
+        print(f"AddNode:\n")
+        try:
+            # Get the previous node code and index
+            input_valA, input_codeA, idxA = self.input(0).payload
+            input_valB, input_codeB, idxB = self.input(1).payload
+
+            print("== AddNode Inputs ==")
+            print("Input A:")
+            print(input_codeA)
+            print("Input B:")
+            print(input_codeB)
+
+            print("Attempting to add Tensor 1 and Tensor 2...")
+            layer = tf.keras.layers.Add()
+            result = layer([input_valA, input_valB])
+            
+            # Generate code
+            code, new_idx = self.generate_code(input_codeA, input_codeB, idxA, idxB)
+
+            print("Successful. Result shape:", result.shape)
+            print("----------------------------------------")
+            self.set_output_val(0, Data((result, code, new_idx)))
+
+        except Exception as e:
+            print("AddNode error:", e)
+            self.set_output_val(0, Data((None, "", 0)))
+
+    
+    def generate_code(self, input_codeA, input_codeB, idxA, idxB):
+        # Deduplicate lines
+        lines_A = input_codeA.strip().split('\n')
+        lines_B = input_codeB.strip().split('\n')
+
+        seen = set()
+        merged_lines = []
+        for line in lines_A + lines_B:
+            if line not in seen:
+                seen.add(line)
+                merged_lines.append(line)
+
+        # Extract variable names from last lines
+        varA = lines_A[-1].split('=')[0].strip()
+        varB = lines_B[-1].split('=')[0].strip()
+        layer_name = f"add_{max(idxA, idxB)}_{str(id(self))[-4:]}"
+        merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{varA}, {varB}])")
+
+        return '\n'.join(merged_lines), max(idxA, idxB) + 1
+
+
+    
+"""    # this
+    def generate_code(self, input_codeA, input_codeB, idxA, idxB):
+        max_index = max(idxA, idxB)
+        layer_name = f"add_{max_index}"
+        input_var_nameA = input_codeA.strip().split("\n")[-1].split("=")[0].strip()
+        input_var_nameB = input_codeB.strip().split("\n")[-1].split("=")[0].strip()
+
+        # Split and deduplicate lines
+        code_lines_A = input_codeA.strip().split("\n")
+        code_lines_B = input_codeB.strip().split("\n")
+
+        # Merge with order preserved, remove exact duplicates
+        combined_lines = []
+        seen = set()
+        for line in code_lines_A + code_lines_B:
+            if line not in seen:
+                combined_lines.append(line)
+                seen.add(line)
+
+        combined_code = "\n".join(combined_lines)
+        final_code = f"{combined_code}\n{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])"
+
+        return final_code, max_index + 1"""
+
+"""def generate_code(self, input_codeA, input_codeB, idxA, idxB):
+        max_index = max(idxA, idxB)
+        layer_name = f"add_{max_index}"
+
+        linesA = input_codeA.strip().split("\n")
+        linesB = input_codeB.strip().split("\n")
+
+        def rename_lines(lines, suffix):
+            renamed = []
+            var_map = {}
+
+            for line in lines:
+                if "=" in line:
+                    var_name, expr = line.split("=", 1)
+                    var_name = var_name.strip()
+                    new_var = f"{var_name}_{suffix}"
+                    var_map[var_name] = new_var
+                    # Replace all known vars in expr
+                    for old_var, new_var_sub in var_map.items():
+                        expr = expr.replace(old_var, new_var_sub)
+                    renamed.append(f"{new_var} ={expr}")
+                else:
+                    renamed.append(line)
+            return renamed, var_map
+
+        renamed_linesA, mapA = rename_lines(linesA, "a")
+        renamed_linesB, mapB = rename_lines(linesB, "b")
+
+        final_varA = list(mapA.values())[-1]
+        final_varB = list(mapB.values())[-1]
+
+        merged_lines = renamed_linesA + renamed_linesB
+        merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{final_varA}, {final_varB}])")
+
+        return "\n".join(merged_lines), max_index + 1"""
+
 
 class PrintShapeNode(Node):
     title = "Print Shape"
@@ -120,38 +271,50 @@ class DenseNode(Node):
     title = 'Dense Node'
     init_inputs = [NodeInputType(label='Input Tensor'),
                    NodeInputType(label='Units'),
-                   NodeInputType(label='Activation (Optional)')]
+                   NodeInputType(label='Activation (Optional)'),
+                   NodeInputType(label='Kernel Initializer (Optional)')]
     init_outputs = [NodeOutputType(label='Output Tensor')]
 
     def update_event(self, inp=-1):
         try:
             print(f"DenseNode:\n")
-            #input_tensor = self.input(0).payload
             input_val, input_code, idx = self.input(0).payload
             units = self.input(1).payload
             activation = self.input(2).payload if self.input(2) and self.input(2).payload is not None else None
+            # kernel_initializer = self.input(3).payload if self.input(3) and self.input(3).payload is not None else 'glorot_uniform'
 
-            layer = tf.keras.layers.Dense(units=units, activation=activation)
+            # Default initializer values
+            kernel_initializer = 'glorot_uniform'
+            kernel_initializer_code = "'glorot_uniform'"
+
+            # Override if custom initializer provided
+            if self.input(3) and self.input(3).payload is not None:
+                initializer_obj, initializer_code = self.input(3).payload
+                kernel_initializer = initializer_obj
+                kernel_initializer_code = initializer_code
+
+            layer = tf.keras.layers.Dense(units=units, activation=activation, kernel_initializer=kernel_initializer)
             result = layer(input_val)
             print(f"Sucessful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, activation, units)
+            code, new_idx = self.generate_code(input_code, idx, activation, units, kernel_initializer_code)
             self.set_output_val(0, Data((result, code, new_idx)))
         except Exception as e:
             print("DenseNode error:", e)
             self.set_output_val(0, Data((None, "", 0)))
 
-    def generate_code(self, input_code, idx, activation, units):
-        layer_name = f"dense_{idx}"
+    def generate_code(self, input_code, idx, activation, units, kernel_initializer_code):
+        layer_name = f"dense_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
+        code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units}, activation={activation}, kernel_initializer={kernel_initializer_code})"
 
-        if activation is None:
+        """if activation is None:
             code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units})({input_var_name})"
         else:
             activation_code = f"'{activation}'" if isinstance(activation, str) else activation
             code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units}, activation={activation_code})({input_var_name})"
-
+"""
         return code, (idx + 1)
     
 
@@ -181,7 +344,7 @@ class DropoutNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx, rate):
-        layer_name = f"dropout_{idx}"
+        layer_name = f"dropout_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.Dropout({rate})({input_var_name})"
@@ -207,7 +370,7 @@ class ReLUNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx):
-        layer_name = f"relu_{idx}"
+        layer_name = f"relu_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.activations.relu({input_var_name})"
@@ -241,7 +404,7 @@ class ZeroPadding2D(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx, padding):
-        layer_name = f"zero_padding2d_{idx}"
+        layer_name = f"zero_padding2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.ZeroPadding2D(padding={padding})({input_var_name})"
@@ -298,7 +461,7 @@ class BatchNormalization(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx, axis):
-        layer_name = f"batch_normalization_{idx}"
+        layer_name = f"batch_normalization_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.BatchNormalization(axis={axis})({input_var_name})"
@@ -324,7 +487,7 @@ class FlattenNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx):
-        layer_name = f"flatten_{idx}"
+        layer_name = f"flatten_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.Flatten()({input_var_name})"
@@ -351,7 +514,18 @@ class Conv2DNode(Node):
             # Optional inputs with defaults
             strides = self.input(3).payload if self.input(3) and self.input(3).payload is not None else (1, 1)
             padding = self.input(4).payload if self.input(4) and self.input(4).payload is not None else 'valid'
-            kernel_initializer = self.input(5).payload if self.input(5) and self.input(5).payload is not None else 'glorot_uniform'
+            # kernel_initializer = self.input(5).payload if self.input(5) and self.input(5).payload is not None else 'glorot_uniform'
+
+            # Default initializer values
+            kernel_initializer = 'glorot_uniform'
+            kernel_initializer_code = "'glorot_uniform'"
+
+            # Override if custom initializer provided
+            if self.input(5) and self.input(5).payload is not None:
+                initializer_obj, initializer_code = self.input(5).payload
+                kernel_initializer = initializer_obj
+                kernel_initializer_code = initializer_code
+
 
             layer = tf.keras.layers.Conv2D(filters=filters, 
                                            kernel_size=kernel_size, 
@@ -361,7 +535,7 @@ class Conv2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, filters, kernel_size, strides, padding, kernel_initializer)
+            code, new_idx = self.generate_code(input_code, idx, filters, kernel_size, strides, padding, kernel_initializer_code)
 
             self.set_output_val(0, Data((result, code, new_idx)))
         except Exception as e:
@@ -369,11 +543,11 @@ class Conv2DNode(Node):
             print(f"----------------------------------------")
             self.set_output_val(0, Data((None, "", 0)))
 
-    def generate_code(self, input_code, idx, filters, kernel_size, strides, padding, kernel_initializer):
-        layer_name = f"conv2d_{idx}"
+    def generate_code(self, input_code, idx, filters, kernel_size, strides, padding, kernel_initializer_code):
+        layer_name = f"conv2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Conv2D(filters={filters}, kernel_size={kernel_size}, strides={strides}, padding='{padding}', kernel_initializer={kernel_initializer})({input_var_name})"
+        code = f"{input_code}\n{layer_name} = tf.keras.layers.Conv2D(filters={filters}, kernel_size={kernel_size}, strides={strides}, padding='{padding}', kernel_initializer={kernel_initializer_code})({input_var_name})"
         return code, (idx + 1)
 
 
@@ -410,7 +584,7 @@ class AveragePooling2DNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
     
     def generate_code(self, input_code, idx, pool_size, strides, padding):
-        layer_name = f"average_pooling2d_{idx}"
+        layer_name = f"average_pooling2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.AveragePooling2D(pool_size={pool_size}, strides={strides}, padding='{padding}')({input_var_name})"
@@ -450,7 +624,7 @@ class MaxPooling2DNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx, pool_size, strides, padding):
-        layer_name = f"max_pooling2d_{idx}"
+        layer_name = f"max_pooling2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.MaxPooling2D(pool_size={pool_size}, strides={strides}, padding={padding})({input_var_name})"
@@ -481,7 +655,7 @@ class GlobalMaxPooling2DNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx):
-        layer_name = f"global_max_pooling2d_{idx}"
+        layer_name = f"global_max_pooling2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.GlobalMaxPooling2D()({input_var_name})"
@@ -512,7 +686,7 @@ class GlobalAveragePooling2DNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx):
-        layer_name = f"global_average_pooling2d_{idx}"
+        layer_name = f"global_average_pooling2d_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.GlobalAveragePooling2D()({input_var_name})"
@@ -544,7 +718,7 @@ class ConcatenateNode(Node):
 
     def generate_code(self, input_code_a, input_code_b, idx_a, idx_b, axis):
         idx = max(idx_a, idx_b)
-        layer_name = f"concatenate_{idx}"
+        layer_name = f"concatenate_{idx}_{str(id(self))[-4:]}"
         input_var_name_a = input_code_a.strip().split("\n")[-1].split("=")[0].strip()
         input_var_name_b = input_code_b.strip().split("\n")[-1].split("=")[0].strip()
 
@@ -575,7 +749,7 @@ class ReshapeNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, input_code, idx, target):
-        layer_name = f"reshape_{idx}"
+        layer_name = f"reshape_{idx}_{str(id(self))[-4:]}"
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code}\n{layer_name} = tf.keras.layers.Reshape(target_shape={target})({input_var_name})"
@@ -634,7 +808,7 @@ class RealTensorNode(Node):
             self.set_output_val(0, Data((None, "", 0)))
 
     def generate_code(self, shape_code, idx):
-        var_name = f"real_tensor_{idx}"
+        var_name = f"real_tensor_{idx}_{str(id(self))[-4:]}"
         full_code = (
             f"{shape_code}\n"
             f"{var_name} = tf.constant(np.arange(np.prod(shape)).reshape(shape), dtype=tf.float32)"
@@ -682,7 +856,7 @@ class ModelNode(Node):
         idx = max(input_idx, output_idx)
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
         output_var_name = output_code.strip().split("\n")[-1].split("=")[0].strip()
-        model_name = f"model_{idx}"
+        model_name = f"model_{idx}_{str(id(self))[-4:]}"
 
         full_code = (
             f"{input_code}\n"
@@ -856,6 +1030,7 @@ class ModelCompileNode(Node):
 
             model_val.compile(optimizer=optimizer, loss=loss, metrics=metrics)
             code, new_idx = self.generate_code(model_code, idx, optimizer, loss, metrics)
+            print(f"model compile: success")
             self.set_output_val(0, Data((model_val, code, new_idx)))
         except Exception as e:
             print("[ModelCompileNode Error]:", e)
@@ -954,7 +1129,7 @@ class ModelFitNode(Node):
         )
         return full_code, idx + 1
 
-# Saves a model as a .keras file
+"""# Saves a model as a .keras file
 class ModelSaveNode(Node):
     title = "Model Save"
     init_inputs = [NodeInputType(label="Model"),
@@ -964,23 +1139,96 @@ class ModelSaveNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            model = self.input(0).payload
+            model_val, model_code, idx = self.input(0).payload
             filepath = self.input(1).payload
-            model.save(filepath)
+            model_val.save(filepath)
             self.set_output_val(0, Data("Model saved successfully."))
         except Exception as e:
             print("ModelSaveNode error:", e)
+            self.set_output_val(0, Data("Model save failed."))"""
+
+"""class ModelSaveNode(Node):
+    title = "Model Save"
+    init_inputs = [
+        NodeInputType(label="Model"),
+        NodeInputType(label="Filepath"),
+    ]
+    init_outputs = [
+        NodeOutputType(label="Status")
+    ]
+
+    def update_event(self, inp=-1):
+        try:
+            os.makedirs("models", exist_ok=True)
+            model_val, model_code, idx = self.input(0).payload
+            filepath = self.input(1).payload or "saved_model.keras"
+            model_val.save(filepath)
+            print(f"Model saved to {filepath}")
+            self.set_output_val(0, Data("Model saved successfully."))
+        except Exception as e:
+            print("[ModelSaveNode Error]:", e)
+            self.set_output_val(0, Data("Model save failed."))"""
+
+
+class ModelSaveNode(Node):
+    title = "Model Save"
+    init_inputs = [
+        NodeInputType(label="Model"),
+        NodeInputType(label="Filepath"),
+    ]
+    init_outputs = [
+        NodeOutputType(label="Status")
+    ]
+
+    def update_event(self, inp=-1):
+        try:
+            model_val, model_code, idx = self.input(0).payload
+            filename = self.input(1).payload or "saved_model.keras"
+
+            # Ensure 'models' folder exists
+            os.makedirs("models", exist_ok=True)
+
+            # Join the folder with filename if it's just a filename (no slash or path given)
+            if not os.path.dirname(filename):  # no directory in filename
+                filepath = os.path.join("models", filename)
+            else:
+                filepath = filename
+
+            model_val.save(filepath)
+            print(f"Model saved to {os.path.abspath(filepath)}")
+            self.set_output_val(0, Data("Model saved successfully."))
+        except Exception as e:
+            print("[ModelSaveNode Error]:", e)
             self.set_output_val(0, Data("Model save failed."))
+
+
 
 class GlorotUniformInitializerNode(Node):
     title = "GlorotUniform Initializer"
-    init_inputs = []
+    init_inputs = [NodeInputType(label="Seed (optional)")]
     init_outputs = [NodeOutputType(label="Initializer")]
 
     def update_event(self, inp=-1):
         try:
-            initializer = tf.keras.initializers.GlorotUniform()
-            self.set_output_val(0, Data(initializer))
+            # Cannot just leave out the 'is not None' because if the input is zero, it will not pass too
+            if (
+                self.input(0) is not None and
+                self.input(0).payload is not None and
+                self.input(0).payload != ''
+            ):
+
+                seed = self.input(0).payload
+            else:
+                seed = None
+            initializer = tf.keras.initializers.GlorotUniform(seed=seed)
+
+            # Code string to use in generate_code
+            if seed is not None:
+                code = f"tf.keras.initializers.GlorotUniform(seed={seed})"
+            else:
+                code = "'glorot_uniform'"  # Use string for default case
+
+            self.set_output_val(0, Data((initializer, code)))
         except Exception as e:
             print("[GlorotUniformInitializerNode error]:", e)
             self.set_output_val(0, Data(None))
@@ -1056,6 +1304,36 @@ class PrintCodeNode(Node):
             print("Error: No code string found in input payload")
 
 
+class DummyImageTrainTestNode(Node):
+    title = "Dummy Train/Test Data"
+    init_inputs = [NodeInputType(label="Num Samples (total)")]
+    init_outputs = [
+        NodeOutputType(label="x_train"),
+        NodeOutputType(label="y_train"),
+        NodeOutputType(label="x_test"),
+        NodeOutputType(label="y_test"),
+    ]
+
+    def update_event(self, inp=-1):
+        try:
+            num_samples = self.input(0).payload or 100
+            num_classes = 10
+            x = np.random.rand(num_samples, 224, 224, 3).astype('float32')
+            y = np.random.randint(0, num_classes, size=(num_samples,))
+            y = tf.keras.utils.to_categorical(y, num_classes)
+
+            x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2)
+
+            self.set_output_val(0, Data((x_train, "x_train = ...", 0)))
+            self.set_output_val(1, Data((y_train, "y_train = ...", 0)))
+            self.set_output_val(2, Data((x_test, "x_test = ...", 0)))
+            self.set_output_val(3, Data((y_test, "y_test = ...", 0)))
+        except Exception as e:
+            print("[DummyImageTrainTestNode Error]:", e)
+            for i in range(4):
+                self.set_output_val(i, Data((None, "", 0)))
+
+
 
 export_nodes([
     # list your node classes here
@@ -1090,6 +1368,7 @@ export_nodes([
     AdamOptimizerNode,
     RMSpropOptimizerNode,
     PrintCodeNode,
+    DummyImageTrainTestNode,
 ])
 
 
