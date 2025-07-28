@@ -5,6 +5,7 @@ from . import nodes
 from qtpy.QtGui import QFont
 from qtpy.QtWidgets import QComboBox
 from qtpy.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtWidgets import QPushButton
 
 
 
@@ -46,7 +47,7 @@ class LineEditWidget(NodeInputWidget, QLineEdit):
         self.setText(state.get('text', ''))  # Restore previous text
 
 
-class ComboBoxWidget(QWidget):
+"""class ComboBoxWidget(QWidget):
     def __init__(self, options, default=None):
         super().__init__()
         self.position = 'below'  # <--- THIS IS REQUIRED
@@ -62,7 +63,7 @@ class ComboBoxWidget(QWidget):
         self.setLayout(layout)
 
     def get_val(self):
-        return self.combo.currentText()
+        return self.combo.currentText()"""
 
 
 
@@ -118,12 +119,26 @@ class DenseNodeGui(NodeGUI):
     
     input_widget_classes = {
         'line_edit': LineEditWidget,
-        'combo_box': ComboBoxWidget
+        #'combo_box': ComboBoxWidget
     }
 
     init_input_widgets = {
         1: {'name': 'line_edit', 'pos': 'below'},
-        2: {'name': 'combo_box', 'pos': 'below', 'args': ['relu', 'sigmoid', 'softmax']}
+        2: {'name': 'line_edit', 'pos': 'below'},
+        #2: {'name': 'combo_box', 'pos': 'below', 'args': ['relu', 'sigmoid', 'softmax']}
+    }
+
+@node_gui(nodes.ModelFitNode)
+class ModelFitNodeGui(NodeGUI):
+    
+    input_widget_classes = {
+        'line_edit': LineEditWidget
+    }
+
+    init_input_widgets = {
+        3: {'name': 'line_edit', 'pos': 'below'},
+        4: {'name': 'line_edit', 'pos': 'below'},
+        7: {'name': 'line_edit', 'pos': 'below'},
     }
 
 @node_gui(nodes.DropoutNode)
@@ -237,7 +252,6 @@ class ModelCompileNodeGui(NodeGUI):
     }
 
     init_input_widgets = {
-        1: {'name': 'line_edit', 'pos': 'below'},
         2: {'name': 'line_edit', 'pos': 'below'},
         3: {'name': 'line_edit', 'pos': 'below'}
     }  

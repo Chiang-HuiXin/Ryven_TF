@@ -1,7 +1,6 @@
 from ryven.node_env import *
 from random import random
 import tensorflow as tf
-from random import random
 import logging
 import ast
 import numpy as np
@@ -9,39 +8,34 @@ import sys
 import ryven
 from qtpy.QtWidgets import QLineEdit
 import os
-from sklearn.model_selection import train_test_split
-#from tensorflow.keras.utils import to_categorical
+import re
 
 logger = logging.getLogger(__name__)
 
+class NameRegistry:
+    def __init__(self):
+        self.used_names = set()
+        self.name_counts = {}
 
-# Global variable to count the names
-input_count = 0
+    def reset(self):
+        self.used_names.clear()
+        self.name_counts.clear()
+
+    def get_unique_name(self, base):
+        count = self.name_counts.get(base, 0)
+        name = f"{base}_{count}"
+        self.name_counts[base] = count + 1
+        self.used_names.add(name)
+        return name
+
+    def has_name(self, name):
+        return name in self.used_names
+
+# Initialise an instance
+name_registry = NameRegistry()
+
 
 # your node definitions go here
-
-class RandNode(Node):
-    """Generates scaled random float values"""
-
-    title = 'Rand'
-    tags = ['random', 'numbers']
-    init_inputs = [NodeInputType()]
-    init_outputs = [NodeOutputType()]
-
-    def update_event(self, inp=-1):
-        self.set_output_val(0, 
-            Data(random() * self.input(0).payload)
-        )
-
-class PrintNode(Node):
-    title = 'Print Node'
-    init_inputs = [NodeInputType()]
-
-    def update_event(self, inp=-1):
-        print(f"Printing result: ")
-        print(self.input(0).payload)
-        print(f"----------------------------------------")
-
 class InputNode(Node):
     title = "Input Node"
     init_inputs = [NodeInputType(label='Shape')]
@@ -52,84 +46,15 @@ class InputNode(Node):
         shape = self.input(0).payload
         try:
             tensor = tf.keras.Input(shape=shape)
-            code = f"input_layer_{input_count}_{str(id(self))[-4:]} = tf.keras.Input(shape={shape})"
+            layer_name = name_registry.get_unique_name("input")
+            code = f"{layer_name} = tf.keras.Input(shape={shape})"
             print(f"Successful")
             print(f"----------------------------------------")
-            self.set_output_val(0, Data((tensor, code, 1)))
+            self.set_output_val(0, Data((tensor, code)))
         except Exception as e:
             print("InputNode error:", e)
             self.set_output_val(0, Data((None, "")))
 
-"""class AddNode(Node):
-    title = "Add Node"
-    init_inputs = [
-        NodeInputType(label='Tensor 1'),
-        NodeInputType(label='Tensor 2')
-    ]
-    init_outputs = [NodeOutputType(label='Result')]
-
-    def update_event(self, inp=-1):
-        print(f"AddNode:\n")
-        try:
-            # Get the previous node code and index
-            input_valA, input_codeA, idxA = self.input(0).payload
-            input_valB, input_codeB, idxB = self.input(1).payload
-
-            print("== AddNode Inputs ==")
-            print("Input A:")
-            print(input_codeA)
-            print("Input B:")
-            print(input_codeB)
-
-            print("Attempting to add Tensor 1 and Tensor 2...")
-            layer = tf.keras.layers.Add()
-            result = layer([input_valA, input_valB])
-            
-            # Generate code
-            code, new_idx = self.generate_code(input_codeA, input_codeB, idxA, idxB)
-
-            print("Successful. Result shape:", result.shape)
-            print("----------------------------------------")
-            self.set_output_val(0, Data((result, code, new_idx)))
-
-        except Exception as e:
-            print("AddNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
-
-    def generate_code(self, input_codeA, input_codeB, idxA, idxB):
-        # Name
-        max_index = max(idxA, idxB)
-        layer_name = f"add_{max_index}"
-        input_var_nameA = input_codeA.strip().split("\n")[-1].split("=")[0].strip() # get the previous name
-        input_var_nameB = input_codeB.strip().split("\n")[-1].split("=")[0].strip()
-
-        print("Parsed A var name:", input_var_nameA)
-        print("Parsed B var name:", input_var_nameB)
-
-        # Combine all lines and deduplicate while preserving order
-        seen_lines = set()
-        merged_lines = []
-
-        for line in input_codeA.strip().split("\n") + input_codeB.strip().split("\n"):
-            if line not in seen_lines:
-                merged_lines.append(line)
-                seen_lines.add(line)
-
-        # Add the Add() operation
-        merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])")
-
-        if (len(input_var_nameA) > len(input_var_nameB)):
-            code = input_var_nameA
-        else:
-            code = input_var_nameB
-
-        code = (
-            f"{code}\n"
-            f"{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])"
-        )
-        return "\n".join(merged_lines), max_index + 1
-        #return merged_lines, (max_index + 1)
-"""
 
 class AddNode(Node):
     title = "Add Node"
@@ -143,33 +68,25 @@ class AddNode(Node):
         print(f"AddNode:\n")
         try:
             # Get the previous node code and index
-            input_valA, input_codeA, idxA = self.input(0).payload
-            input_valB, input_codeB, idxB = self.input(1).payload
-
-            print("== AddNode Inputs ==")
-            print("Input A:")
-            print(input_codeA)
-            print("Input B:")
-            print(input_codeB)
+            input_valA, input_codeA = self.input(0).payload
+            input_valB, input_codeB = self.input(1).payload
 
             print("Attempting to add Tensor 1 and Tensor 2...")
             layer = tf.keras.layers.Add()
             result = layer([input_valA, input_valB])
             
             # Generate code
-            code, new_idx = self.generate_code(input_codeA, input_codeB, idxA, idxB)
+            code = self.generate_code(input_codeA, input_codeB)
 
             print("Successful. Result shape:", result.shape)
             print("----------------------------------------")
-            self.set_output_val(0, Data((result, code, new_idx)))
+            self.set_output_val(0, Data((result, code)))
 
         except Exception as e:
             print("AddNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    
-    def generate_code(self, input_codeA, input_codeB, idxA, idxB):
-        # Deduplicate lines
+    def generate_code(self, input_codeA, input_codeB):
         lines_A = input_codeA.strip().split('\n')
         lines_B = input_codeB.strip().split('\n')
 
@@ -180,78 +97,16 @@ class AddNode(Node):
                 seen.add(line)
                 merged_lines.append(line)
 
-        # Extract variable names from last lines
         varA = lines_A[-1].split('=')[0].strip()
         varB = lines_B[-1].split('=')[0].strip()
-        layer_name = f"add_{max(idxA, idxB)}_{str(id(self))[-4:]}"
+
+        layer_name = name_registry.get_unique_name("add")
         merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{varA}, {varB}])")
 
-        return '\n'.join(merged_lines), max(idxA, idxB) + 1
+        return "\n".join(merged_lines)
 
 
-    
-"""    # this
-    def generate_code(self, input_codeA, input_codeB, idxA, idxB):
-        max_index = max(idxA, idxB)
-        layer_name = f"add_{max_index}"
-        input_var_nameA = input_codeA.strip().split("\n")[-1].split("=")[0].strip()
-        input_var_nameB = input_codeB.strip().split("\n")[-1].split("=")[0].strip()
-
-        # Split and deduplicate lines
-        code_lines_A = input_codeA.strip().split("\n")
-        code_lines_B = input_codeB.strip().split("\n")
-
-        # Merge with order preserved, remove exact duplicates
-        combined_lines = []
-        seen = set()
-        for line in code_lines_A + code_lines_B:
-            if line not in seen:
-                combined_lines.append(line)
-                seen.add(line)
-
-        combined_code = "\n".join(combined_lines)
-        final_code = f"{combined_code}\n{layer_name} = tf.keras.layers.Add()([{input_var_nameA}, {input_var_nameB}])"
-
-        return final_code, max_index + 1"""
-
-"""def generate_code(self, input_codeA, input_codeB, idxA, idxB):
-        max_index = max(idxA, idxB)
-        layer_name = f"add_{max_index}"
-
-        linesA = input_codeA.strip().split("\n")
-        linesB = input_codeB.strip().split("\n")
-
-        def rename_lines(lines, suffix):
-            renamed = []
-            var_map = {}
-
-            for line in lines:
-                if "=" in line:
-                    var_name, expr = line.split("=", 1)
-                    var_name = var_name.strip()
-                    new_var = f"{var_name}_{suffix}"
-                    var_map[var_name] = new_var
-                    # Replace all known vars in expr
-                    for old_var, new_var_sub in var_map.items():
-                        expr = expr.replace(old_var, new_var_sub)
-                    renamed.append(f"{new_var} ={expr}")
-                else:
-                    renamed.append(line)
-            return renamed, var_map
-
-        renamed_linesA, mapA = rename_lines(linesA, "a")
-        renamed_linesB, mapB = rename_lines(linesB, "b")
-
-        final_varA = list(mapA.values())[-1]
-        final_varB = list(mapB.values())[-1]
-
-        merged_lines = renamed_linesA + renamed_linesB
-        merged_lines.append(f"{layer_name} = tf.keras.layers.Add()([{final_varA}, {final_varB}])")
-
-        return "\n".join(merged_lines), max_index + 1"""
-
-
-class PrintShapeNode(Node):
+"""class PrintShapeNode(Node):
     title = "Print Shape"
     init_inputs = [NodeInputType(label="Tensor")]
 
@@ -264,7 +119,8 @@ class PrintShapeNode(Node):
             print(f"----------------------------------------")
         else:
             print("Not a tensor or no shape")
-            print(f"----------------------------------------")
+            print(f"----------------------------------------")"""
+
 
 # Input: activation units
 class DenseNode(Node):
@@ -278,44 +134,51 @@ class DenseNode(Node):
     def update_event(self, inp=-1):
         try:
             print(f"DenseNode:\n")
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             units = self.input(1).payload
-            activation = self.input(2).payload if self.input(2) and self.input(2).payload is not None else None
-            # kernel_initializer = self.input(3).payload if self.input(3) and self.input(3).payload is not None else 'glorot_uniform'
+            #activation = self.input(2).payload if self.input(2) and self.input(2).payload is not None else None
+            """activation = self.input(2).payload
+            if activation is None or activation == "":
+                activation = None"""
+            activation = self.input(2).payload if self.input(2) and self.input(2).payload not in [None, ""] else None
 
             # Default initializer values
             kernel_initializer = 'glorot_uniform'
             kernel_initializer_code = "'glorot_uniform'"
 
             # Override if custom initializer provided
-            if self.input(3) and self.input(3).payload is not None:
+            """if self.input(3) and self.input(3).payload is not None:
                 initializer_obj, initializer_code = self.input(3).payload
                 kernel_initializer = initializer_obj
+                kernel_initializer_code = initializer_code"""
+
+            if self.input(3) and self.input(3).payload:
+                initializer_payload = self.input(3).payload
+                print("Received initializer:", initializer_payload)
+
+                initializer_obj, initializer_code = initializer_payload
+                kernel_initializer = initializer_obj
                 kernel_initializer_code = initializer_code
+            else:
+                print("Using default initializer: glorot_uniform")
 
             layer = tf.keras.layers.Dense(units=units, activation=activation, kernel_initializer=kernel_initializer)
             result = layer(input_val)
             print(f"Sucessful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, activation, units, kernel_initializer_code)
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, activation, units, kernel_initializer_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("DenseNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, activation, units, kernel_initializer_code):
-        layer_name = f"dense_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, activation, units, kernel_initializer_code):
+        layer_name = name_registry.get_unique_name("dense")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units}, activation={activation}, kernel_initializer={kernel_initializer_code})"
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Dense({units}, activation='{activation}', kernel_initializer={kernel_initializer_code})({input_var_name})"
 
-        """if activation is None:
-            code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units})({input_var_name})"
-        else:
-            activation_code = f"'{activation}'" if isinstance(activation, str) else activation
-            code = f"{input_code}\n{layer_name} = tf.keras.layers.Dense({units}, activation={activation_code})({input_var_name})"
-"""
-        return code, (idx + 1)
+        return code
     
 
 class DropoutNode(Node):
@@ -329,26 +192,25 @@ class DropoutNode(Node):
     def update_event(self, inp=-1):
         try:
             print(f"Dropout")
-            #x = self.input(0).payload
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             rate = self.input(1).payload
 
             layer = tf.keras.layers.Dropout(rate=rate)
             result = layer(input_val, training=True)
             print(f"success")
 
-            code, new_idx = self.generate_code(input_code, idx, rate)
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, rate)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("DropoutNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, rate):
-        layer_name = f"dropout_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, rate):
+        layer_name = name_registry.get_unique_name("dropout")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Dropout({rate})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Dropout({rate})({input_var_name})"
+        return code
 
 
 # Check if you can input a list into 
@@ -359,22 +221,21 @@ class ReLUNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             result = tf.keras.activations.relu(input_val)
 
-            code, new_idx = self.generate_code(input_code, idx)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("ReLUNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx):
-        layer_name = f"relu_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code):
+        layer_name = name_registry.get_unique_name("relu")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.activations.relu({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.activations.relu({input_var_name})"
+        return code
 
 
 class ZeroPadding2D(Node):
@@ -386,7 +247,7 @@ class ZeroPadding2D(Node):
     def update_event(self, inp=-1):
         try:
             print(f"ZeroPadding2D Node")
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             padding = self.input(1).payload
 
             # Only pass through if input is a Keras symbolic tensor
@@ -397,46 +258,19 @@ class ZeroPadding2D(Node):
             result = layer(input_val)
             print(f"Successful")
 
-            code, new_idx = self.generate_code(input_code, idx, padding)
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, padding)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("ZeroPaddingNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, padding):
-        layer_name = f"zero_padding2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, padding):
+        layer_name = name_registry.get_unique_name("zero_padding2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.ZeroPadding2D(padding={padding})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.ZeroPadding2D(padding={padding})({input_var_name})"
+        return code
 
-
-"""def normalize_tensor_input(x):
-    # Case 1: Input is a string (from a Val node)
-    if isinstance(x, str):
-        try:
-            x = ast.literal_eval(x)
-            x = np.array(x, dtype=np.float32)
-        except Exception as e:
-            raise ValueError(f"Failed to parse string input: {e}")
-    
-    # Case 2: Input is a list or tuple
-    elif isinstance(x, (list, tuple)):
-        x = np.array(x, dtype=np.float32)
-    
-    # Case 3: Input is a NumPy array
-    elif isinstance(x, np.ndarray):
-        x = x.astype(np.float32)
-    
-    # Case 4: Input is already a Tensor
-    elif isinstance(x, tf.Tensor):
-        return x
-    
-    else:
-        raise ValueError(f"Unsupported input type: {type(x)}")
-    
-    # Convert to Tensor if not already
-    return tf.convert_to_tensor(x)"""
 
 class BatchNormalization(Node):
     title = "BatchNormalization"
@@ -446,26 +280,25 @@ class BatchNormalization(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             axis = self.input(1).payload
 
             layer = tf.keras.layers.BatchNormalization(axis=axis)
             result = layer(input_val)
             print(f"Successful")
 
-            code, new_idx = self.generate_code(input_code, idx, axis)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, axis)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("BatchNormalizationNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, axis):
-        layer_name = f"batch_normalization_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, axis):
+        layer_name = name_registry.get_unique_name("batch_normalization")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.BatchNormalization(axis={axis})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.BatchNormalization(axis={axis})({input_var_name})"
+        return code
     
 
 class FlattenNode(Node):
@@ -475,23 +308,22 @@ class FlattenNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             layer = tf.keras.layers.Flatten()
             result = layer(input_val)
 
-            code, new_idx = self.generate_code(input_code, idx)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("FlattenNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx):
-        layer_name = f"flatten_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code):
+        layer_name = name_registry.get_unique_name("flatten")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Flatten()({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Flatten()({input_var_name})"
+        return code
 
 
 class Conv2DNode(Node):
@@ -507,14 +339,13 @@ class Conv2DNode(Node):
     def update_event(self, inp=-1):
         try: 
             print(f"Conv2D Node:\n")
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             filters = self.input(1).payload
             kernel_size = self.input(2).payload
             
             # Optional inputs with defaults
             strides = self.input(3).payload if self.input(3) and self.input(3).payload is not None else (1, 1)
             padding = self.input(4).payload if self.input(4) and self.input(4).payload is not None else 'valid'
-            # kernel_initializer = self.input(5).payload if self.input(5) and self.input(5).payload is not None else 'glorot_uniform'
 
             # Default initializer values
             kernel_initializer = 'glorot_uniform'
@@ -526,7 +357,6 @@ class Conv2DNode(Node):
                 kernel_initializer = initializer_obj
                 kernel_initializer_code = initializer_code
 
-
             layer = tf.keras.layers.Conv2D(filters=filters, 
                                            kernel_size=kernel_size, 
                                            strides=strides, padding=padding, 
@@ -535,20 +365,19 @@ class Conv2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, filters, kernel_size, strides, padding, kernel_initializer_code)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, filters, kernel_size, strides, padding, kernel_initializer_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("[Conv2DNode error]:", e)
             print(f"----------------------------------------")
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, filters, kernel_size, strides, padding, kernel_initializer_code):
-        layer_name = f"conv2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, filters, kernel_size, strides, padding, kernel_initializer_code):
+        layer_name = name_registry.get_unique_name("conv2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Conv2D(filters={filters}, kernel_size={kernel_size}, strides={strides}, padding='{padding}', kernel_initializer={kernel_initializer_code})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Conv2D(filters={filters}, kernel_size={kernel_size}, strides={strides}, padding='{padding}', kernel_initializer={kernel_initializer_code})({input_var_name})"
+        return code
 
 
 # Performs average pooling on a 2D input tensor, calculates the mean of all values in the window
@@ -562,7 +391,7 @@ class AveragePooling2DNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             print(f"AveragePooling2D:\n")
             pool_size = self.input(1).payload
             strides = self.input(2).payload
@@ -575,20 +404,19 @@ class AveragePooling2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, pool_size, strides, padding)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, pool_size, strides, padding)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("[AveragePooling2D error]:", e)
             print(f"----------------------------------------")
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
     
-    def generate_code(self, input_code, idx, pool_size, strides, padding):
-        layer_name = f"average_pooling2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, pool_size, strides, padding):
+        layer_name = name_registry.get_unique_name("average_pooling2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.AveragePooling2D(pool_size={pool_size}, strides={strides}, padding='{padding}')({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.AveragePooling2D(pool_size={pool_size}, strides={strides}, padding='{padding}')({input_var_name})"
+        return code
 
 
 # MaxPooling is a downsampling technique that extracts the maximum value from each window
@@ -602,7 +430,7 @@ class MaxPooling2DNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             print(f"MaxPooling2D")
             pool_size = self.input(1).payload
             strides = self.input(2).payload
@@ -615,20 +443,19 @@ class MaxPooling2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx, pool_size, strides, padding)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code, pool_size, strides, padding)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("[MaxPooling2D error]:", e)
             print(f"----------------------------------------")
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, pool_size, strides, padding):
-        layer_name = f"max_pooling2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, pool_size, strides, padding):
+        layer_name = name_registry.get_unique_name("max_pooling2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.MaxPooling2D(pool_size={pool_size}, strides={strides}, padding={padding})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.MaxPooling2D(pool_size={pool_size}, strides={strides}, padding={padding})({input_var_name})"
+        return code
 
 
 class GlobalMaxPooling2DNode(Node):
@@ -638,7 +465,7 @@ class GlobalMaxPooling2DNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             print(f"GlobalMaxPooling2D")
 
             layer = tf.keras.layers.GlobalMaxPooling2D()
@@ -646,20 +473,19 @@ class GlobalMaxPooling2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("[GlobalMaxPooling2D error]:", e)
             print(f"----------------------------------------")
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx):
-        layer_name = f"global_max_pooling2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code):
+        layer_name = name_registry.get_unique_name("global_max_pooling2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.GlobalMaxPooling2D()({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.GlobalMaxPooling2D()({input_var_name})"
+        return code
     
 
 class GlobalAveragePooling2DNode(Node):
@@ -669,7 +495,7 @@ class GlobalAveragePooling2DNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             print(f"GlobalAveragePooling2D Node")
 
             layer = tf.keras.layers.GlobalAveragePooling2D()
@@ -677,20 +503,19 @@ class GlobalAveragePooling2DNode(Node):
             print(f"Successful")
             print(f"----------------------------------------")
 
-            code, new_idx = self.generate_code(input_code, idx)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("[GlobalAveragePooling2D error]:", e)
             print(f"----------------------------------------")
             self.set_output_val(0, Data((None, "", 0)))
 
-    def generate_code(self, input_code, idx):
-        layer_name = f"global_average_pooling2d_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code):
+        layer_name = name_registry.get_unique_name("global_average_pooling2d")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.GlobalAveragePooling2D()({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.GlobalAveragePooling2D()({input_var_name})"
+        return code
 
 
 class ConcatenateNode(Node):
@@ -703,27 +528,25 @@ class ConcatenateNode(Node):
     def update_event(self, inp=-1):
         try:
             print(f"Concatenate")
-            input_val_a, input_code_a, idx_a = self.input(0).payload
-            input_val_b, input_code_b, idx_b = self.input(1).payload
+            input_val_a, input_code_a = self.input(0).payload
+            input_val_b, input_code_b = self.input(1).payload
             axis = self.input(2).payload
 
             result = tf.keras.layers.concatenate([input_val_a, input_val_b], axis=axis)
 
-            code, new_idx = self.generate_code(input_code_a, input_code_b, idx_a, idx_b, axis)
-
-            self.set_output_val(0, Data((result, code, new_idx)))
+            code = self.generate_code(input_code_a, input_code_b, axis)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("ConcatenateNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code_a, input_code_b, idx_a, idx_b, axis):
-        idx = max(idx_a, idx_b)
-        layer_name = f"concatenate_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code_a, input_code_b, axis):
+        layer_name = name_registry.get_unique_name("concatenate")
         input_var_name_a = input_code_a.strip().split("\n")[-1].split("=")[0].strip()
         input_var_name_b = input_code_b.strip().split("\n")[-1].split("=")[0].strip()
 
         code = f"{input_code_a}\n{input_code_b}\n{layer_name} = tf.keras.layers.Concatenate(axis={axis})([{input_var_name_a}, {input_var_name_b}])"
-        return code, (idx + 1)
+        return code
 
 
 class ReshapeNode(Node):
@@ -735,47 +558,25 @@ class ReshapeNode(Node):
     def update_event(self, inp=-1):
         try:
             print(f"Reshape Node")
-            input_val, input_code, idx = self.input(0).payload
+            input_val, input_code = self.input(0).payload
             target = self.input(1).payload
 
             layer = tf.keras.layers.Reshape(target_shape=target)
             result = layer(input_val)
 
-            code, new_idx = self.generate_code(input_code, idx, target)
-
-            self.set_output_val(0, Data((result, code, idx)))
+            code = self.generate_code(input_code, target)
+            self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("Reshape Node error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, idx, target):
-        layer_name = f"reshape_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, input_code, target):
+        layer_name = name_registry.get_unique_name("reshape")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        code = f"{input_code}\n{layer_name} = tf.keras.layers.Reshape(target_shape={target})({input_var_name})"
-        return code, (idx + 1)
+        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Reshape(target_shape={target})({input_var_name})"
+        return code
     
-
-"""class RealTensorNode(Node):
-    title = "Real Tensor"
-    init_inputs = [NodeInputType(label='Shape (tuple)')]
-    init_outputs = [NodeOutputType(label='Real Tensor')]
-
-    def update_event(self, inp=-1):
-        try:
-            shape = self.input(0).payload
-
-            if not isinstance(shape, (list, tuple)):
-                raise ValueError("Shape must be a tuple or list")
-
-            # Generate test data (customize as needed)
-            tensor = tf.constant(np.arange(np.prod(shape)).reshape(shape), dtype=tf.float32)
-            print(f"RealTensorNode: Generated tensor with shape {shape}")
-            self.set_output_val(0, Data(tensor))
-        except Exception as e:
-            print("RealTensorNode error:", e)
-            self.set_output_val(0, Data(None))"""
-
 
 class RealTensorNode(Node):
     title = "Real Tensor"
@@ -800,21 +601,20 @@ class RealTensorNode(Node):
             tensor = tf.constant(np.arange(np.prod(shape_val)).reshape(shape_val), dtype=tf.float32)
             print(f"RealTensorNode: Generated tensor with shape {shape_val}")
 
-            code, new_idx = self.generate_code(shape_code, idx)
-            self.set_output_val(0, Data((tensor, code, new_idx)))
+            code = self.generate_code(shape_code)
+            self.set_output_val(0, Data((tensor, code)))
 
         except Exception as e:
             print("RealTensorNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, shape_code, idx):
-        var_name = f"real_tensor_{idx}_{str(id(self))[-4:]}"
+    def generate_code(self, shape_code):
+        var_name = name_registry.get_unique_name("real")
         full_code = (
             f"{shape_code}\n"
             f"{var_name} = tf.constant(np.arange(np.prod(shape)).reshape(shape), dtype=tf.float32)"
         )
-        return full_code, idx + 1
-
+        return full_code
 
 class FlushWrapper:
     def __init__(self, wrapped):
@@ -834,8 +634,8 @@ class ModelNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            input_tensor, input_code, input_idx = self.input(0).payload
-            output_tensor, output_code, output_idx = self.input(1).payload
+            input_tensor, input_code = self.input(0).payload
+            output_tensor, output_code = self.input(1).payload
         
             if input_tensor is None or output_tensor is None:
                 raise ValueError("Missing input or output tensor.")
@@ -844,103 +644,48 @@ class ModelNode(Node):
             sys.stdout = FlushWrapper(sys.stdout)
 
             model = tf.keras.Model(inputs=input_tensor, outputs=output_tensor)
-            code, new_idx = self.generate_code(input_code, output_code, input_idx, output_idx)
-
-            self.set_output_val(0, Data((model, code, new_idx)))
-
+            code = self.generate_code(input_code, output_code)
+            print(f"Successful")
+            self.set_output_val(0, Data((model, code)))
         except Exception as e:
             print("[KerasModelNode Error]:", e)
             self.set_output_val(0, Data((None, "", 0)))
+
+    def generate_code(self, input_code, output_code):
+        lines_input = input_code.strip().split('\n')
+        lines_output = output_code.strip().split('\n')
+
+        seen = set()
+        merged_lines = []
+
+        for line in lines_input + lines_output:
+            if line not in seen:
+                seen.add(line)
+                merged_lines.append(line)
+
+        input_var = lines_input[-1].split('=')[0].strip()
+        output_var = lines_output[-1].split('=')[0].strip()
+        model_name = name_registry.get_unique_name("model")
+
+        merged_lines.append(
+            f"{model_name} = tf.keras.Model(inputs={input_var}, outputs={output_var})"
+        )
+
+        return "\n".join(merged_lines)
+
     
-    def generate_code(self, input_code, output_code, input_idx, output_idx):
+    """def generate_code(self, input_code, output_code, input_idx, output_idx):
         idx = max(input_idx, output_idx)
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
         output_var_name = output_code.strip().split("\n")[-1].split("=")[0].strip()
-        model_name = f"model_{idx}_{str(id(self))[-4:]}"
+        layer_name = name_registry.get_unique_name("add")
 
         full_code = (
             f"{input_code}\n"
             f"{output_code}\n"
-            f"{model_name} = tf.keras.Model(inputs={input_var_name}, outputs={output_var_name})"
+            f"{layer_name} = tf.keras.Model(inputs={input_var_name}, outputs={output_var_name})"
         )
-        return full_code, idx + 1
-    
-"""class ModelNode(Node):
-    title = "Model"
-    init_inputs = [
-        NodeInputType(label="Input"),
-        NodeInputType(label="Output")
-    ]
-    init_outputs = [NodeOutputType(label="Keras Model")]
-
-    def update_event(self, inp=-1):
-        try:
-            input_tensor = self.input(0)
-            output_tensor = self.input(1)
-
-            if input_tensor is None or output_tensor is None:
-                raise ValueError("Input or output tensor is missing.")
-
-            input_val = input_tensor.payload
-            output_val = output_tensor.payload
-
-            if input_val is None or output_val is None:
-                raise ValueError("One or both tensor payloads are None.")
-
-            from tensorflow.keras import Model
-            model = Model(inputs=input_val, outputs=output_val)
-
-            # Generate code
-            code = f"model_{self.id} = tf.keras.Model(inputs=input_{self.id}, outputs=output_{self.id})"
-            model_package = (model, code, self.id)
-
-            self.set_output_val(0, Data(model_package))
-        except Exception as e:
-            print("[ModelNode Error]:", e)
-            self.set_output_val(0, Data((None, "", self.id)))"""
-
-
-"""class ModelNode(Node):
-    title = "Model"
-    init_inputs = [
-        NodeInputType(label="Input"),
-        NodeInputType(label="Output")
-    ]
-    init_outputs = [NodeOutputType(label="Keras Model")]
-
-    def update_event(self, inp=-1):
-        try:
-            input_data = self.input(0)
-            output_data = self.input(1)
-
-            if input_data is None or output_data is None:
-                raise ValueError("Input or output is missing.")
-
-            # Unpack payloads: (tensor, code, idx)
-            input_tensor, input_code, input_idx = input_data.payload
-            output_tensor, output_code, output_idx = output_data.payload
-
-            if input_tensor is None or output_tensor is None:
-                raise ValueError("One or both tensor values are None.")
-
-            from tensorflow.keras import Model
-            model = Model(inputs=input_tensor, outputs=output_tensor)
-
-            # Generate code
-            code = (
-                input_code + "\n" +
-                output_code + "\n" +
-                f"model_{self.id} = tf.keras.Model(inputs=input_{self.id}, outputs=output_{self.id})"
-            )
-            model_package = (model, code, self.id)
-
-            self.set_output_val(0, Data(model_package))
-        except Exception as e:
-            print("[ModelNode Error]:", e)
-            self.set_output_val(0, Data((None, "", self.id)))"""
-
-
-
+        return full_code, idx + 1"""
     
 
 """class ModelSummaryNode(Node):
@@ -950,10 +695,14 @@ class ModelNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            model_val, model_code, idx = self.input(0).payload
-            
-            if model_val is None:
+            model_data = self.input(0)
+            if model_data is None or model_data.payload is None:
                 raise ValueError("No model provided.")
+
+            model_val, model_code, idx, model_ids = model_data.payload
+
+            if not hasattr(model_val, 'summary'):
+                raise TypeError("Provided object is not a Keras model.")
 
             # Capture the printed summary
             summary_lines = []
@@ -961,18 +710,18 @@ class ModelNode(Node):
             summary_text = "\n".join(summary_lines)
 
             code, new_idx = self.generate_code(model_code, idx)
-
+            new_ids = model_ids.union({id(self)})
             print("Model Summary:\n" + summary_text)
-            self.set_output_val(0, Data((summary_text, code, new_idx)))
+            self.set_output_val(0, Data((summary_text, code, new_idx, new_ids)))
         except Exception as e:
             print("[ModelSummaryNode Error]:", e)
             self.set_output_val(0, Data(("Error generating summary", "", 0)))
 
     def generate_code(self, model_code, idx):
-        model_var = model_code.strip().split("\n")[-1].split("=")[0].strip()
+        lines = model_code.strip().split("\n")
+        model_var = lines[-1].split("=")[0].strip() if "=" in lines[-1] else "model"
         new_code = f"{model_code}\n{model_var}.summary()"
         return new_code, idx + 1"""
-
 
 class ModelSummaryNode(Node):
     title = "Model Summary"
@@ -985,29 +734,70 @@ class ModelSummaryNode(Node):
             if model_data is None or model_data.payload is None:
                 raise ValueError("No model provided.")
 
-            model_val, model_code, idx = model_data.payload
+            model_val, model_code = model_data.payload
 
             if not hasattr(model_val, 'summary'):
                 raise TypeError("Provided object is not a Keras model.")
 
-            # Capture the printed summary
+            # Capture the summary text
             summary_lines = []
             model_val.summary(print_fn=lambda line: summary_lines.append(line))
             summary_text = "\n".join(summary_lines)
 
-            code, new_idx = self.generate_code(model_code, idx)
+            code = self.generate_code(model_code)
 
             print("Model Summary:\n" + summary_text)
-            self.set_output_val(0, Data((summary_text, code, new_idx)))
+            print("----------------------------------------")
+
+            self.set_output_val(0, Data((summary_text, code)))
         except Exception as e:
             print("[ModelSummaryNode Error]:", e)
-            self.set_output_val(0, Data(("Error generating summary", "", 0)))
+            self.set_output_val(0, Data(("Error generating summary", "")))
 
-    def generate_code(self, model_code, idx):
+    def generate_code(self, model_code):
         lines = model_code.strip().split("\n")
         model_var = lines[-1].split("=")[0].strip() if "=" in lines[-1] else "model"
         new_code = f"{model_code}\n{model_var}.summary()"
-        return new_code, idx + 1
+        return new_code
+
+
+"""class ModelCompileNode(Node):
+    title = "Model Compile"
+    init_inputs = [
+        NodeInputType(label="Keras Model"),
+        NodeInputType(label="Optimizer"),
+        NodeInputType(label="Loss"),
+        NodeInputType(label="Metrics"),
+    ]
+    init_outputs = [NodeOutputType(label="Compiled Model")]
+
+    def update_event(self, inp=-1):
+        try:
+            print(f"ModelCompile")
+            model_val, model_code = self.input(0).payload
+            optimizer, opt_code = self.input(1).payload
+            loss = self.input(2).payload
+            metrics = self.input(3).payload
+
+            model_val.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+            code = self.generate_code(model_code, optimizer, loss, metrics)
+            print(f"model compile: success")
+            self.set_output_val(0, Data((model_val, code)))
+        except Exception as e:
+            print("[ModelCompileNode Error]:", e)
+            self.set_output_val(0, Data((None, "")))
+
+    def generate_code(self, model_code, optimizer, loss, metrics):
+        model_var = model_code.strip().split("\n")[-1].split("=")[0].strip()
+
+        if isinstance(metrics, (list, tuple)):
+            metrics_strs = [f'"{m}"' for m in metrics]
+            metrics_list = "[" + ", ".join(metrics_strs) + "]"
+        else:
+            metrics_list = f'"{metrics}"'
+
+        compile_code = f"{model_code.strip()}\n{model_var}.compile(optimizer=\"{optimizer}\", loss=\"{loss}\", metrics={metrics_list})"
+        return compile_code"""
 
 
 class ModelCompileNode(Node):
@@ -1023,30 +813,46 @@ class ModelCompileNode(Node):
     def update_event(self, inp=-1):
         try:
             print(f"ModelCompile")
-            model_val, model_code, idx = self.input(0).payload
-            optimizer = self.input(1).payload
+            model_val, model_code = self.input(0).payload
+            # Get optimizer and its code safely
+            optimizer_data = self.input(1).payload
+            if isinstance(optimizer_data, tuple):
+                optimizer, opt_code = optimizer_data
+            else:
+                optimizer = optimizer_data
+                opt_code = f'"{optimizer}"'  # Fallback
+
             loss = self.input(2).payload
             metrics = self.input(3).payload
 
+            # Compile the model
             model_val.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-            code, new_idx = self.generate_code(model_code, idx, optimizer, loss, metrics)
-            print(f"model compile: success")
-            self.set_output_val(0, Data((model_val, code, new_idx)))
+
+            # Generate code
+            code = self.generate_code(model_code, opt_code, loss, metrics)
+            print(f"Model compile: success")
+
+            self.set_output_val(0, Data((model_val, code)))
         except Exception as e:
             print("[ModelCompileNode Error]:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, model_code, idx, optimizer, loss, metrics):
+    def generate_code(self, model_code, optimizer_code, loss, metrics):
         model_var = model_code.strip().split("\n")[-1].split("=")[0].strip()
 
+        # Handle metrics formatting
         if isinstance(metrics, (list, tuple)):
             metrics_strs = [f'"{m}"' for m in metrics]
             metrics_list = "[" + ", ".join(metrics_strs) + "]"
         else:
             metrics_list = f'"{metrics}"'
 
-        compile_code = f"{model_code}\n{model_var}.compile(optimizer=\"{optimizer}\", loss=\"{loss}\", metrics={metrics_list})"
-        return compile_code, idx + 1
+        compile_code = (
+            f"{model_code.strip()}\n"
+            f"{model_var}.compile(optimizer={optimizer_code}, loss=\"{loss}\", metrics={metrics_list})"
+        )
+        return compile_code
+
 
 
 # Model.evaluate: Returns the loss value & metrics values for the model in test mode.
@@ -1060,25 +866,46 @@ class ModelEvaluateNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            (model_val, model_code, model_idx) = self.input(0).payload
-            (x_val, x_code, x_idx) = self.input(1).payload
-            (y_val, y_code, y_idx) = self.input(2).payload
+            model_val, model_code = self.input(0).payload
+            x_val, x_code, x_idx = self.input(1).payload
+            y_val, y_code, y_idx = self.input(2).payload
 
             results = model_val.evaluate(x_val, y_val, verbose=0)
-            code, new_idx = self.generate_code(model_code, x_code, y_code, model_idx, x_idx, y_idx)
-
-            self.set_output_val(0, Data((results, code, new_idx)))
+            code = self.generate_code(model_code, x_code, y_code, x_idx, y_idx)
+            self.set_output_val(0, Data((results, code)))
         except Exception as e:
             print("ModelEvaluateNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
+
+    def generate_code(self, model_code, x_code, y_code):
+        lines_model = model_code.strip().split("\n")
+        lines_x = x_code.strip().split("\n")
+        lines_y = y_code.strip().split("\n")
+
+        # Deduplicate all lines
+        seen = set()
+        merged_lines = []
+        for line in lines_model + lines_x + lines_y:
+            if line not in seen:
+                seen.add(line)
+                merged_lines.append(line)
+
+        # Extract variable names
+        model_var = lines_model[-1].split("=")[0].strip()
+        x_var = lines_x[-1].split("=")[0].strip()
+        y_var = lines_y[-1].split("=")[0].strip()
+
+        eval_var = name_registry.get_unique_name("evaluate")
+        merged_lines.append(f"{eval_var} = {model_var}.evaluate({x_var}, {y_var}, verbose=0)")
+
+        return "\n".join(merged_lines)
     
-    def generate_code(self, model_code, x_code, y_code, model_idx, x_idx, y_idx):
-        idx = max(model_idx, x_idx, y_idx)
+    """def generate_code(self, model_code, x_code, y_code):
         model_var = model_code.strip().split("\n")[-1].split("=")[0].strip()
         x_var = x_code.strip().split("\n")[-1].split("=")[0].strip()
         y_var = y_code.strip().split("\n")[-1].split("=")[0].strip()
 
-        eval_var = f"eval_results_{idx}"
+        eval_var = name_registry.get_unique_name("evaluate")
 
         full_code = (
             f"{model_code}\n"
@@ -1086,88 +913,82 @@ class ModelEvaluateNode(Node):
             f"{y_code}\n"
             f"{eval_var} = {model_var}.evaluate({x_var}, {y_var}, verbose=0)"
         )
-        return full_code, idx + 1
+        return full_code"""
+    
+
 
 # Model.fit: Trains the model for a fixed number of epochs (dataset iterations).
 class ModelFitNode(Node):
     title = "Model Fit"
     init_inputs = [NodeInputType(label="Model"),
-                   NodeInputType(label="x (Inputs)"),
-                   NodeInputType(label="y (Targets)"),
+                   NodeInputType(label="x"),
+                   NodeInputType(label="y"),
                    NodeInputType(label="Epochs"),
-                   NodeInputType(label="Batch Size")]
+                   NodeInputType(label="Batch Size"),
+                   NodeInputType(label="Validation Data X(Optional)"),
+                   NodeInputType(label="Validation Data Y(Optional)"),
+                   NodeInputType(label="Verbose"),
+                   NodeInputType(label="Trigger (Button)", type_ = 'exec')]
     
     init_outputs = [NodeOutputType(label="History")]
 
     def update_event(self, inp=-1):
         try:
-            model_val, model_code, model_idx = self.input(0).payload
-            x_val, x_code, x_idx = self.input(1).payload
-            y_val, y_code, y_idx = self.input(2).payload
-            epochs = self.input(3).payload
-            batch_size = self.input(4).payload
 
-            history = model_val.fit(x_val, y_val, epochs=epochs, batch_size=batch_size, verbose=0)
-            code, new_idx = self.generate_code(model_code, x_code, y_code, model_idx, x_idx, y_idx, epochs, batch_size)
-            self.set_output_val(0, Data((history, code, new_idx)))
+            if inp == 8:
+                model_val, model_code = self.input(0).payload
+                x_val, x_code = self.input(1).payload
+                y_val, y_code = self.input(2).payload
+                epochs = int(self.input(3).payload)
+                batch_size = int(self.input(4).payload)
+                #val_data = self.input(5).payload if self.input(5) is not None else None
+                #val_data = self.input(6).payload if self.input(6) is not None else None
+                verbose = int(self.input(7).payload if self.input(7) is not None else 0)
+
+                val_data = None
+                val_code_x, val_code_y = "", ""
+
+                if self.input(5) and self.input(5).payload and self.input(6) and self.input(6).payload:
+                    val_data_x, val_code_x = self.input(5).payload
+                    val_data_y, val_code_y = self.input(6).payload
+                    val_data = (val_data_x, val_data_y)
+
+                history = model_val.fit(x_val, y_val, epochs=epochs, batch_size=batch_size, validation_data=val_data, verbose=verbose)
+                code = self.generate_code(model_code, x_code, y_code, epochs, batch_size, val_code_x, val_code_y, verbose)
+                self.set_output_val(0, Data((model_val, code)))
         except Exception as e:
             print("ModelFitNode error:", e)
-            self.set_output_val(0, Data((None, "", 0)))
+            self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, model_code, x_code, y_code, model_idx, x_idx, y_idx, epochs, batch_size):
-        idx = max(model_idx, x_idx, y_idx)
-        model_var = model_code.strip().split("\n")[-1].split("=")[0].strip()
-        x_var = x_code.strip().split("\n")[-1].split("=")[0].strip()
-        y_var = y_code.strip().split("\n")[-1].split("=")[0].strip()
-        hist_var = f"history_{idx}"
+    def generate_code(self, model_code, x_code, y_code, epochs, batch_size, val_code_x, val_code_y, verbose):
+        lines_model = model_code.strip().split("\n")
+        lines_x = x_code.strip().split("\n")
+        lines_y = y_code.strip().split("\n")
+        lines_val_x = val_code_x.strip().split("\n")
+        lines_val_y = val_code_y.strip().split("\n")
 
-        full_code = (
-            f"{model_code}\n"
-            f"{x_code}\n"
-            f"{y_code}\n"
-            f"{hist_var} = {model_var}.fit({x_var}, {y_var}, epochs={epochs}, batch_size={batch_size}, verbose=0)"
+        seen = set()
+        merged_lines = []
+        for line in lines_model + lines_x + lines_y + lines_val_x + lines_val_y:
+            if line not in seen:
+                seen.add(line)
+                merged_lines.append(line)
+
+        # Detect model name like "model_0 = ..."
+        model_var = "model"
+        for line in reversed(lines_model):
+            match = re.match(r"(model_\d+)\s*=", line)
+            if match:
+                model_var = match.group(1)
+                break
+
+        hist_var = name_registry.get_unique_name("fit")
+
+        merged_lines.append(
+            f"{hist_var} = {model_var}.fit(trainX, trainY, epochs={epochs}, batch_size={batch_size}, validation_data=(testX, testY), verbose={verbose})"
         )
-        return full_code, idx + 1
 
-"""# Saves a model as a .keras file
-class ModelSaveNode(Node):
-    title = "Model Save"
-    init_inputs = [NodeInputType(label="Model"),
-                   NodeInputType(label="Filepath")]
-    
-    init_outputs = [NodeOutputType(label="Status")]
-
-    def update_event(self, inp=-1):
-        try:
-            model_val, model_code, idx = self.input(0).payload
-            filepath = self.input(1).payload
-            model_val.save(filepath)
-            self.set_output_val(0, Data("Model saved successfully."))
-        except Exception as e:
-            print("ModelSaveNode error:", e)
-            self.set_output_val(0, Data("Model save failed."))"""
-
-"""class ModelSaveNode(Node):
-    title = "Model Save"
-    init_inputs = [
-        NodeInputType(label="Model"),
-        NodeInputType(label="Filepath"),
-    ]
-    init_outputs = [
-        NodeOutputType(label="Status")
-    ]
-
-    def update_event(self, inp=-1):
-        try:
-            os.makedirs("models", exist_ok=True)
-            model_val, model_code, idx = self.input(0).payload
-            filepath = self.input(1).payload or "saved_model.keras"
-            model_val.save(filepath)
-            print(f"Model saved to {filepath}")
-            self.set_output_val(0, Data("Model saved successfully."))
-        except Exception as e:
-            print("[ModelSaveNode Error]:", e)
-            self.set_output_val(0, Data("Model save failed."))"""
+        return "\n".join(merged_lines)
 
 
 class ModelSaveNode(Node):
@@ -1182,7 +1003,7 @@ class ModelSaveNode(Node):
 
     def update_event(self, inp=-1):
         try:
-            model_val, model_code, idx = self.input(0).payload
+            model_val, model_code = self.input(0).payload
             filename = self.input(1).payload or "saved_model.keras"
 
             # Ensure 'models' folder exists
@@ -1196,17 +1017,78 @@ class ModelSaveNode(Node):
 
             model_val.save(filepath)
             print(f"Model saved to {os.path.abspath(filepath)}")
-            self.set_output_val(0, Data("Model saved successfully."))
+
+            code = self.generate_code(model_code, filepath)
+            self.set_output_val(0, Data(("Model saved successfully.", code)))
         except Exception as e:
             print("[ModelSaveNode Error]:", e)
             self.set_output_val(0, Data("Model save failed."))
 
+    def generate_code(self, model_code, filepath):
+        lines = model_code.strip().split("\n")
+        model_var_name = None
+
+        # Find the last variable assignment that matches "model_# ="
+        for line in reversed(lines):
+            match = re.match(r"(model_\d+)\s*=", line)
+            if match:
+                model_var_name = match.group(1)
+                break
+
+        # Fallback name
+        if not model_var_name:
+            model_var_name = "model"
+
+        abs_path = os.path.abspath(filepath)
+
+        return f"{model_code}\n{model_var_name}.save(r\"{abs_path}\")"
+
+
+    """def generate_code(self, model_code, filepath):
+        # Try to find a line with model =
+        lines = model_code.strip().split("\n")
+        model_var_name = None
+        for line in reversed(lines):
+            if "=" in line:
+                model_var_name = line.split("=")[0].strip()
+                break
+
+        # Fallback
+        if not model_var_name:
+            model_var_name = "model"
+
+        abs_path = os.path.abspath(filepath)
+
+        save_code = (
+            f"{model_code}\n"
+            f"{model_var_name}.save(r\"{abs_path}\")"
+        )
+        return save_code"""
+
+
+    """def generate_code(self, model_code, filepath):
+        model_var_name = model_code.strip().split("\n")[-1].split("=")[0].strip()
+        
+        # Default or sanitized path
+        if not os.path.dirname(filepath):
+            filepath = os.path.join("models", filepath)
+        abs_path = os.path.abspath(filepath)
+
+        save_code = (
+            f"{model_code}\n"
+            f"{model_var_name}.save(r\"{abs_path}\")  # Save model"
+        )
+        return save_code"""
 
 
 class GlorotUniformInitializerNode(Node):
     title = "GlorotUniform Initializer"
     init_inputs = [NodeInputType(label="Seed (optional)")]
     init_outputs = [NodeOutputType(label="Initializer")]
+
+    def place_event(self):
+        # Called when node is placed in the workspace
+        self.update_event()
 
     def update_event(self, inp=-1):
         try:
@@ -1238,14 +1120,22 @@ class HeUniformInitializerNode(Node):
     init_inputs = []
     init_outputs = [NodeOutputType(label="Initializer")]
 
+    def place_event(self):
+        # Called when node is placed in the workspace
+        self.update_event()
+
     def update_event(self, inp=-1):
         try:
             initializer = tf.keras.initializers.HeUniform()
-            self.set_output_val(0, Data(initializer))
+            code = f"tf.keras.initializers.HeUniform()"
+            print("HeUniform output set successfully:", code)
+            self.set_output_val(0, Data((initializer, code)))
         except Exception as e:
             print("[HeUniformInitializerNode error]:", e)
             self.set_output_val(0, Data(None))
 
+
+# havent do the unpacking of tuple
 class SGDOptimizerNode(Node):
     title = "SGD Optimizer"
     init_inputs = [NodeInputType(label="Learning Rate")]
@@ -1254,11 +1144,12 @@ class SGDOptimizerNode(Node):
     def update_event(self, inp=-1):
         try:
             lr = self.input(0).payload
+            code = f"tf.keras.optimizers.SGD(learning_rate={lr})"
             optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
-            self.set_output_val(0, Data(optimizer))
+            self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[SGDOptimizerNode error]:", e)
-            self.set_output_val(0, Data(None))
+            self.set_output_val(0, Data((None, "")))
 
 class AdamOptimizerNode(Node):
     title = "Adam Optimizer"
@@ -1268,11 +1159,12 @@ class AdamOptimizerNode(Node):
     def update_event(self, inp=-1):
         try:
             lr = self.input(0).payload
+            code = f"tf.keras.optimizers.Adam(learning_rate={lr})"
             optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-            self.set_output_val(0, Data(optimizer))
+            self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[AdamOptimizerNode error]:", e)
-            self.set_output_val(0, Data(None))
+            self.set_output_val(0, Data((None, "")))
 
 class RMSpropOptimizerNode(Node):
     title = "RMSprop Optimizer"
@@ -1282,11 +1174,12 @@ class RMSpropOptimizerNode(Node):
     def update_event(self, inp=-1):
         try:
             lr = self.input(0).payload
+            code = f"tf.keras.optimizers.RMSprop(learning_rate={lr})"
             optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr)
-            self.set_output_val(0, Data(optimizer))
+            self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[RMSpropOptimizerNode error]:", e)
-            self.set_output_val(0, Data(None))
+            self.set_output_val(0, Data((None, "")))
 
 
 class PrintCodeNode(Node):
@@ -1296,15 +1189,18 @@ class PrintCodeNode(Node):
 
     def update_event(self, inp=-1):
         payload = self.input(0).payload
-        if isinstance(payload, tuple) and len(payload) == 3:
+
+        # Reset name registry before new code generation
+        name_registry.reset()
+
+        if isinstance(payload, tuple) and len(payload) >= 2:
             code = payload[1]
             print("Generated Code:\n", code)
             print(f"---------------------------------------")
         else:
             print("Error: No code string found in input payload")
 
-
-class DummyImageTrainTestNode(Node):
+"""class DummyImageTrainTestNode(Node):
     title = "Dummy Train/Test Data"
     init_inputs = [NodeInputType(label="Num Samples (total)")]
     init_outputs = [
@@ -1331,8 +1227,58 @@ class DummyImageTrainTestNode(Node):
         except Exception as e:
             print("[DummyImageTrainTestNode Error]:", e)
             for i in range(4):
-                self.set_output_val(i, Data((None, "", 0)))
+                self.set_output_val(i, Data((None, "", 0)))"""
 
+class MNISTLoaderNode(Node):
+    title="MNIST Loader"
+    init_inputs = []
+    init_outputs = [
+        NodeOutputType(label="trainX"),
+        NodeOutputType(label="trainY"),
+        NodeOutputType(label="testX"),
+        NodeOutputType(label="testY"),
+    ]
+
+    def place_event(self):
+        # Called when node is placed in the workspace
+        self.update_event()
+
+    def update_event(self, inp=-1):
+        try:
+            # Load dataset
+            (trainX, trainY), (testX, testY) = tf.keras.datasets.mnist.load_data()
+
+            # Reshape and normalize
+            trainX = trainX.reshape((trainX.shape[0], 28 * 28, -1)) / 255.0
+            testX = testX.reshape((testX.shape[0], 28 * 28, -1)) / 255.0
+
+            # One-hot encode the labels
+            trainY = tf.keras.utils.to_categorical(trainY)
+            testY = tf.keras.utils.to_categorical(testY)
+
+            # Code representation
+            code = (
+                "(trainX, trainY), (testX, testY) = mnist.load_data()\n"
+                "trainX = trainX.reshape((trainX.shape[0], 28*28, -1)) / 255.0\n"
+                "testX = testX.reshape((testX.shape[0], 28*28, -1)) / 255.0\n"
+                "trainY = to_categorical(trainY)\n"
+                "testY = to_categorical(testY)\n"
+            )
+
+            # Set outputs (each paired with code)
+            self.set_output_val(0, Data((trainX, code)))
+            self.set_output_val(1, Data((trainY, code)))
+            self.set_output_val(2, Data((testX, code)))
+            self.set_output_val(3, Data((testY, code)))
+
+            print("MNIST data loaded and processed.")
+
+        except Exception as e:
+            print("MNISTLoaderNode error:", e)
+            self.set_output_val(0, Data((None, "")))
+            self.set_output_val(1, Data((None, "")))
+            self.set_output_val(2, Data((None, "")))
+            self.set_output_val(3, Data((None, "")))
 
 
 export_nodes([
@@ -1342,12 +1288,9 @@ export_nodes([
     AddNode,
     InputNode,
     ReLUNode,
-    RandNode,
     ZeroPadding2D,
     BatchNormalization,
     FlattenNode,
-    PrintNode,
-    PrintShapeNode,
     Conv2DNode,
     AveragePooling2DNode,
     MaxPooling2DNode,
@@ -1368,7 +1311,7 @@ export_nodes([
     AdamOptimizerNode,
     RMSpropOptimizerNode,
     PrintCodeNode,
-    DummyImageTrainTestNode,
+    MNISTLoaderNode,
 ])
 
 
