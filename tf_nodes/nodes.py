@@ -84,6 +84,7 @@ class InputNode(Node):
             layer_name = name_registry.get_unique_name("input")
             code = f"import tensorflow as tf\n{layer_name} = tf.keras.Input(shape={shape})"
             print(f"InputNode successful\n")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((tensor, code)))
         except Exception as e:
             print("InputNode error:", e)
@@ -123,7 +124,6 @@ class AddNode(Node):
                        If an error occurs, sets output to (None, "").
         """
 
-        print(f"AddNode:\n")
         try:
             input_valA, input_codeA = self.input(0).payload
             input_valB, input_codeB = self.input(1).payload
@@ -134,6 +134,7 @@ class AddNode(Node):
             code = self.generate_code(input_codeA, input_codeB)
 
             print(f"AddNode successful\n")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("AddNode error:", e)
@@ -171,7 +172,7 @@ class AddNode(Node):
 
         return "\n".join(merged_lines)
 
-
+    
 class DenseNode(Node):
     """
     A Ryven node that applies a Keras Dense layer.
@@ -180,7 +181,7 @@ class DenseNode(Node):
         Input Tensor (Data): The input tensor and its code.
         Units (int): Number of neurons in the Dense layer.
         Activation (str or Data, optional): A tuple of (activation_name, code string), 
-                                          or a raw string if entered manually.
+                                            or a raw string if entered manually.
         Kernel Initializer (Data, optional): Initializer object and its code.
 
     Outputs:
@@ -188,12 +189,14 @@ class DenseNode(Node):
             - The resulting tensor after applying the Dense layer.
             - The generated Python code for this layer.
     """
-    
+
     title = 'Dense Node'
-    init_inputs = [NodeInputType(label='Input Tensor'),
-                   NodeInputType(label='Units'),
-                   NodeInputType(label='Activation (Optional)'),
-                   NodeInputType(label='Kernel Initializer (Optional)')]
+    init_inputs = [
+        NodeInputType(label='Input Tensor'),
+        NodeInputType(label='Units'),
+        NodeInputType(label='Activation (Optional)'),
+        NodeInputType(label='Kernel Initializer (Optional)')
+    ]
     init_outputs = [NodeOutputType(label='Output Tensor')]
 
     def update_event(self, inp=-1):
@@ -211,33 +214,39 @@ class DenseNode(Node):
             print(f"DenseNode:\n")
             input_val, input_code = self.input(0).payload
             units = self.input(1).payload
-            activation = self.input(2).payload if self.input(2) and self.input(2).payload not in [None, ""] else None
 
-            # Default initializer values
-            kernel_initializer = 'glorot_uniform'
-            kernel_initializer_code = "'glorot_uniform'"
-
-            if self.input(3) and self.input(3).payload:
-                initializer_payload = self.input(3).payload
-                print("Received initializer:", initializer_payload)
-
-                initializer_obj, initializer_code = initializer_payload
-                kernel_initializer = initializer_obj
-                kernel_initializer_code = initializer_code
+            # Handle activation
+            if self.input(2) and self.input(2).payload not in [None, ""]:
+                activation_payload = self.input(2).payload
+                if isinstance(activation_payload, tuple):
+                    activation_fn, activation_code = activation_payload
+                else:
+                    activation_fn = activation_payload
+                    activation_code = f"'{activation_payload}'"
             else:
-                print("Using default initializer: glorot_uniform")
+                activation_fn = None
+                activation_code = "None"
 
-            layer = tf.keras.layers.Dense(units=units, activation=activation, kernel_initializer=kernel_initializer)
+            # Handle kernel initializer
+            if self.input(3) and self.input(3).payload:
+                kernel_initializer, kernel_initializer_code = self.input(3).payload
+            else:
+                kernel_initializer = 'glorot_uniform'
+                kernel_initializer_code = "'glorot_uniform'"
+
+            # Build Dense layer
+            layer = tf.keras.layers.Dense(units=units, activation=activation_fn, kernel_initializer=kernel_initializer)
             result = layer(input_val)
-            print(f"Sucessful\n")
+            print(f"Success\n----------------------------------------")
 
-            code = self.generate_code(input_code, activation, units, kernel_initializer_code)
+            code = self.generate_code(input_code, units, activation_code, kernel_initializer_code)
             self.set_output_val(0, Data((result, code)))
+
         except Exception as e:
             print("DenseNode error:", e)
             self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, input_code, activation, units, kernel_initializer_code):
+    def generate_code(self, input_code, units, activation_code, kernel_initializer_code):
         """
         Generates Python code for the Dense layer.
 
@@ -253,9 +262,14 @@ class DenseNode(Node):
         """
         layer_name = name_registry.get_unique_name("dense")
         input_var_name = input_code.strip().split("\n")[-1].split("=")[0].strip()
-        code = f"{input_code.strip()}\n{layer_name} = tf.keras.layers.Dense({units}, activation='{activation}', kernel_initializer={kernel_initializer_code})({input_var_name})"
-
+        code = (
+            f"{input_code.strip()}\n"
+            f"{layer_name} = tf.keras.layers.Dense("
+            f"{units}, activation={activation_code}, kernel_initializer={kernel_initializer_code}"
+            f")({input_var_name})"
+        )
         return code
+
     
 
 class DropoutNode(Node):
@@ -297,6 +311,7 @@ class DropoutNode(Node):
             layer = tf.keras.layers.Dropout(rate=rate)
             result = layer(input_val, training=True)
             print(f"DropoutNode successful\n")
+            print(f"----------------------------------------")
 
             code = self.generate_code(input_code, rate)
             self.set_output_val(0, Data((result, code)))
@@ -420,6 +435,7 @@ class ZeroPadding2D(Node):
             layer = tf.keras.layers.ZeroPadding2D(padding=padding)
             result = layer(input_val)
             print(f"ZeroPaddingNode successful")
+            print(f"----------------------------------------")
 
             code = self.generate_code(input_code, padding)
             self.set_output_val(0, Data((result, code)))
@@ -482,7 +498,8 @@ class BatchNormalization(Node):
 
             layer = tf.keras.layers.BatchNormalization(axis=axis)
             result = layer(input_val)
-            print(f"Successful")
+            print(f"Batch Normalization: Successful")
+            print(f"----------------------------------------")
 
             code = self.generate_code(input_code, axis)
             self.set_output_val(0, Data((result, code)))
@@ -541,6 +558,8 @@ class FlattenNode(Node):
             input_val, input_code = self.input(0).payload
             layer = tf.keras.layers.Flatten()
             result = layer(input_val)
+            print(f"Faltten node successful")
+            print(f"----------------------------------------")
 
             code = self.generate_code(input_code)
             self.set_output_val(0, Data((result, code)))
@@ -976,7 +995,6 @@ class ConcatenateNode(Node):
                        Outputs (None, "") if an error occurs.
         """
         try:
-            print(f"Concatenate")
             input_val_a, input_code_a = self.input(0).payload
             input_val_b, input_code_b = self.input(1).payload
             axis = self.input(2).payload
@@ -984,6 +1002,8 @@ class ConcatenateNode(Node):
             result = tf.keras.layers.concatenate([input_val_a, input_val_b], axis=axis)
 
             code = self.generate_code(input_code_a, input_code_b, axis)
+            print(f"Concatenate node successful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("ConcatenateNode error:", e)
@@ -1054,7 +1074,6 @@ class ReshapeNode(Node):
                        If an error occurs, outputs (None, "").
         """
         try:
-            print(f"Reshape Node")
             input_val, input_code = self.input(0).payload
             target = self.input(1).payload
 
@@ -1062,6 +1081,8 @@ class ReshapeNode(Node):
             result = layer(input_val)
 
             code = self.generate_code(input_code, target)
+            print(f"Reshape Node succesful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((result, code)))
         except Exception as e:
             print("Reshape Node error:", e)
@@ -1153,7 +1174,8 @@ class ModelNode(Node):
 
             model = tf.keras.Model(inputs=input_tensor, outputs=output_tensor)
             code = self.generate_code(input_code, output_code)
-            print(f"Successful")
+            print(f"Model Successful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((model, code)))
         except Exception as e:
             print("[KerasModelNode Error]:", e)
@@ -1207,7 +1229,7 @@ class ModelSummaryNode(Node):
 
     title = "Model Summary"
     init_inputs = [NodeInputType(label="Keras Model")]
-    init_outputs = [NodeOutputType(label="Summary")]
+    init_outputs = [NodeOutputType()]
 
     def update_event(self, inp=-1):
         """
@@ -1314,6 +1336,7 @@ class ModelCompileNode(Node):
 
             code = self.generate_code(model_code, opt_code, loss, metrics)
             print(f"Model compile: success")
+            print(f"----------------------------------------")
 
             self.set_output_val(0, Data((model_val, code)))
         except Exception as e:
@@ -1366,7 +1389,8 @@ class ModelEvaluateNode(Node):
     title = "Model Evaluate"
     init_inputs = [NodeInputType(label="Model"),
                    NodeInputType(label="x (Inputs)"),
-                   NodeInputType(label="y (Targets)")]
+                   NodeInputType(label="y (Targets)"),
+                   NodeInputType(label="Verbose")]
     
     init_outputs = [NodeOutputType(label="Loss and Metrics")]
 
@@ -1383,17 +1407,20 @@ class ModelEvaluateNode(Node):
         """
         try:
             model_val, model_code = self.input(0).payload
-            x_val, x_code, x_idx = self.input(1).payload
-            y_val, y_code, y_idx = self.input(2).payload
+            x_val, x_code = self.input(1).payload
+            y_val, y_code = self.input(2).payload
+            verbose = int(self.input(3).payload if self.input(3) else 0)
 
-            results = model_val.evaluate(x_val, y_val, verbose=0)
-            code = self.generate_code(model_code, x_code, y_code, x_idx, y_idx)
+            results = model_val.evaluate(x_val, y_val, verbose=verbose)
+            code = self.generate_code(model_code, x_code, y_code, verbose)
+            print(f"Evaluation results: {results}")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((results, code)))
         except Exception as e:
             print("ModelEvaluateNode error:", e)
             self.set_output_val(0, Data((None, "")))
 
-    def generate_code(self, model_code, x_code, y_code):
+    def generate_code(self, model_code, x_code, y_code, verbose):
         """
         Generates Python code for evaluating the model.
 
@@ -1416,16 +1443,21 @@ class ModelEvaluateNode(Node):
                 seen.add(line)
                 merged_lines.append(line)
 
-        # Extract variable names
-        model_var = lines_model[-1].split("=")[0].strip()
+        # Extract model name correctly
+        model_var = "model"
+        for line in reversed(lines_model):
+            if re.search(r"model_\d+\s*=", line):
+                model_var = line.split("=")[0].strip()
+                break
+
         x_var = lines_x[-1].split("=")[0].strip()
         y_var = lines_y[-1].split("=")[0].strip()
 
         eval_var = name_registry.get_unique_name("evaluate")
-        merged_lines.append(f"{eval_var} = {model_var}.evaluate({x_var}, {y_var}, verbose=0)")
+        merged_lines.append(f"{model_var}.evaluate(testX, testY, verbose={verbose})")
 
         return "\n".join(merged_lines)
-    
+
 
 class ModelFitNode(Node):
     """
@@ -1454,8 +1486,8 @@ class ModelFitNode(Node):
                    NodeInputType(label="y"),
                    NodeInputType(label="Epochs"),
                    NodeInputType(label="Batch Size"),
-                   NodeInputType(label="Validation Data X(Optional)"),
-                   NodeInputType(label="Validation Data Y(Optional)"),
+                   NodeInputType(label="Validation Data X"),
+                   NodeInputType(label="Validation Data Y"),
                    NodeInputType(label="Verbose"),
                    NodeInputType(label="Trigger (Button)", type_ = 'exec')]
     
@@ -1594,6 +1626,7 @@ class ModelSaveNode(Node):
 
             code = self.generate_code(model_code, filepath)
             self.set_output_val(0, Data(("Model saved successfully.", code)))
+            print(f"----------------------------------------")
         except Exception as e:
             print("[ModelSaveNode Error]:", e)
             self.set_output_val(0, Data("Model save failed."))
@@ -1759,6 +1792,8 @@ class SGDOptimizerNode(Node):
             lr = self.input(0).payload
             code = f"tf.keras.optimizers.SGD(learning_rate={lr})"
             optimizer = tf.keras.optimizers.SGD(learning_rate=lr)
+            print(f"SGDOptimizer node: Sucessful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[SGDOptimizerNode error]:", e)
@@ -1797,6 +1832,8 @@ class AdamOptimizerNode(Node):
             lr = self.input(0).payload
             code = f"tf.keras.optimizers.Adam(learning_rate={lr})"
             optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+            print(f"AdamOptimizer node: Sucessful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[AdamOptimizerNode error]:", e)
@@ -1834,6 +1871,8 @@ class RMSpropOptimizerNode(Node):
             lr = self.input(0).payload
             code = f"tf.keras.optimizers.RMSprop(learning_rate={lr})"
             optimizer = tf.keras.optimizers.RMSprop(learning_rate=lr)
+            print(f"RMSpropOptimizer node: Sucessful")
+            print(f"----------------------------------------")
             self.set_output_val(0, Data((optimizer, code)))
         except Exception as e:
             print("[RMSpropOptimizerNode error]:", e)
@@ -1920,11 +1959,11 @@ class MNISTLoaderNode(Node):
 
             # Code representation
             code = (
-                "(trainX, trainY), (testX, testY) = mnist.load_data()\n"
+                "(trainX, trainY), (testX, testY) = tf.keras.datasets.mnist.load_data()\n"
                 "trainX = trainX.reshape((trainX.shape[0], 28*28, -1)) / 255.0\n"
                 "testX = testX.reshape((testX.shape[0], 28*28, -1)) / 255.0\n"
-                "trainY = to_categorical(trainY)\n"
-                "testY = to_categorical(testY)\n"
+                "trainY = tf.keras.utils.to_categorical(trainY)\n"
+                "testY = tf.keras.utils.to_categorical(testY)\n"
             )
 
             # Set outputs (each paired with code)

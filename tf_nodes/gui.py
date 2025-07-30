@@ -266,3 +266,14 @@ class ModelSaveNodeGui(NodeGUI):
     init_input_widgets = {
         1: {'name': 'line_edit', 'pos': 'below'}
     } 
+
+@node_gui(nodes.ModelEvaluateNode)
+class ModelEvaluateNodeGui(NodeGUI):
+    
+    input_widget_classes = {
+        'line_edit': LineEditWidget
+    }
+
+    init_input_widgets = {
+        3: {'name': 'line_edit', 'pos': 'below'}
+    } 
